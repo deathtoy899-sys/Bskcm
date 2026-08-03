@@ -1,0 +1,98 @@
+Getgenv().AutoFish = true 
+-- ปรับเพิ่มเวลาในการดึงปลา (หน่วยเป็นวินาที) เช่น 1.5 - 2.5 วินาที
+getgenv().CatchDelay = 2.0 
+
+local FishLocation = Vector3.new(-1695.546, 83.277, -3367.889)
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CaughRemote = ReplicatedStorage:WaitForChild("FishDev"):WaitForChild("Remote"):WaitForChild("CaughRemote")
+local FishingRemote = ReplicatedStorage:WaitForChild("FishDev"):WaitForChild("Remote"):WaitForChild("FishingRemote")
+
+local lastCastTime = 0
+
+if getgenv().FastCatchConn then getgenv().FastCatchConn:Disconnect() end
+
+getgenv().FastCatchConn = CaughRemote.OnClientEvent:Connect(function(waterType)
+    if not getgenv().AutoFish then return end
+    
+    -- หน่วงเวลาก่อนส่งสัญญาณว่าตกปลาสำเร็จ
+    task.wait(getgenv().CatchDelay)
+    
+    pcall(function()
+        CaughRemote:FireServer(true, waterType)
+    end)
+    
+    local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local fGui = pGui and pGui:FindFirstChild("FishingGui")
+    if fGui then
+        local EndGame = fGui:FindFirstChild("EndGame")
+        if EndGame then pcall(function() EndGame:Fire() end) end
+        fGui.Enabled = false
+        
+        local GameScript = fGui:FindFirstChild("GameScript")
+        if GameScript then GameScript.Enabled = false end
+    end
+end)
+
+task.spawn(function()
+    -- ปรับรอบการตรวจสอบให้ช้าลงเป็นทุกๆ 0.5 วินาที
+    while task.wait(0.5) do
+        if not getgenv().AutoFish then continue end
+
+        local char = LocalPlayer.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChild("Humanoid")
+        if not root or not hum or hum.Health <= 0 then continue end
+
+        local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if pGui and pGui:FindFirstChild("FishingGui") and pGui.FishingGui.Enabled then
+            continue
+        end
+
+        local dist = (root.Position - FishLocation).Magnitude
+        if dist > 5 then
+            hum:MoveTo(FishLocation)
+            continue
+        else
+            hum:MoveTo(root.Position) 
+        end
+
+        local rod = char:FindFirstChildWhichIsA("Tool")
+        if not rod or not (rod.Name:find("เบ็ด") or rod.Name:find("Rod") or rod:FindFirstChild("Hook") or (rod:FindFirstChild("Handle") and rod.Handle:FindFirstChild("EndRod"))) then
+            for _, item in ipairs(LocalPlayer.Backpack:GetChildren()) do
+                if item:IsA("Tool") and (item.Name:find("เบ็ด") or item.Name:find("Rod") or item:FindFirstChild("Hook") or (item:FindFirstChild("Handle") and item.Handle:FindFirstChild("EndRod"))) then
+                    hum:EquipTool(item)
+                    task.wait(1.0) -- ปรับเวลารอหลังถือเบ็ดเป็น 1 วินาที
+                    rod = item
+                    break
+                end
+            end
+            continue
+        end
+
+        if rod and rod:FindFirstChild("Handle") and rod.Handle:FindFirstChild("EndRod") then
+            local isFishing = false
+            for _, v in pairs(rod:GetChildren()) do
+                if v.Name == "Hook" then 
+                    isFishing = true 
+                    break
+                end
+            end
+
+            -- ปรับระยะเวลาเว้นช่วงระหว่างการเหวี่ยงเบ็ดแต่ละครั้ง (เปลี่ยนจาก 2.5 เป็น 4.5 วินาที)
+            if not isFishing and (tick() - lastCastTime > 4.5) then
+                local targetCast = root.Position + (root.CFrame.LookVector * 20) - Vector3.new(0, 10, 0)
+                
+                pcall(function()
+                    FishingRemote:FireServer(targetCast, rod.Handle.EndRod, rod)
+                end)
+                
+                lastCastTime = tick()
+                task.wait(2.0) -- เพิ่มเวลารอหลังจากส่งสัญญาณเหวี่ยงเบ็ด
+            end
+        end
+    end
+end)
