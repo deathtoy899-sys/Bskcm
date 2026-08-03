@@ -1,0 +1,165 @@
+getgenv().AutoFish = true 
+getgenv().CatchDelay = 1.5 
+
+local FishLocation = Vector3.new(-1695.546, 83.277, -3367.889)
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CaughRemote = ReplicatedStorage:WaitForChild("FishDev"):WaitForChild("Remote"):WaitForChild("CaughRemote")
+local FishingRemote = ReplicatedStorage:WaitForChild("FishDev"):WaitForChild("Remote"):WaitForChild("FishingRemote")
+
+local lastCastTime = 0
+
+---------------------------------------------------------
+-- ระบบสร้างหน้าต่าง UI สำหรับเปิด/ปิด (GUI Setup)
+---------------------------------------------------------
+local CoreGui = game:GetService("CoreGui")
+if CoreGui:FindFirstChild("AutoFishGui") then
+    CoreGui.AutoFishGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoFishGui"
+screenGui.ResetOnSpawn = false
+
+-- ตรวจสอบการใส่ UI ลงใน CoreGui หรือ PlayerGui
+local success = pcall(function()
+    screenGui.Parent = CoreGui
+end)
+if not success then
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local frame = Instance.new("Frame")
+frame.Name = "MainFrame"
+frame.Size = UDim2.new(0, 180, 0, 90)
+frame.Position = UDim2.new(0.05, 0, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true -- สามารถลากย้ายตำแหน่ง UI บนหน้าจอได้
+frame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "AUTO FISH"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 14
+title.Font = Enum.Font.SourceSansBold
+title.Parent = frame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Size = UDim2.new(0.8, 0, 0, 35)
+toggleBtn.Position = UDim2.new(0.1, 0, 0.45, 0)
+toggleBtn.BackgroundColor3 = getgenv().AutoFish and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
+toggleBtn.Text = getgenv().AutoFish and "Status: ON" or "Status: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 14
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.Parent = frame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = toggleBtn
+
+-- สลับการทำงานเมื่อกดปุ่ม
+toggleBtn.MouseButton1Click:Connect(function()
+    getgenv().AutoFish = not getgenv().AutoFish
+    if getgenv().AutoFish then
+        toggleBtn.Text = "Status: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+    else
+        toggleBtn.Text = "Status: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    end
+end)
+
+---------------------------------------------------------
+-- ระบบการทำงานตกปลาอัตโนมัติ (Logic)
+---------------------------------------------------------
+if getgenv().FastCatchConn then getgenv().FastCatchConn:Disconnect() end
+
+getgenv().FastCatchConn = CaughRemote.OnClientEvent:Connect(function(waterType)
+    if not getgenv().AutoFish then return end
+    
+    task.wait(getgenv().CatchDelay)
+    
+    pcall(function()
+        CaughRemote:FireServer(true, waterType)
+    end)
+    
+    local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local fGui = pGui and pGui:FindFirstChild("FishingGui")
+    if fGui then
+        local EndGame = fGui:FindFirstChild("EndGame")
+        if EndGame then pcall(function() EndGame:Fire() end) end
+        fGui.Enabled = false
+        
+        local GameScript = fGui:FindFirstChild("GameScript")
+        if GameScript then GameScript.Enabled = false end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.3) do
+        if not getgenv().AutoFish then continue end
+
+        local char = LocalPlayer.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChild("Humanoid")
+        if not root or not hum or hum.Health <= 0 then continue end
+
+        -- 1. เดินไปที่จุดตกปลา
+        local dist = (root.Position - FishLocation).Magnitude
+        if dist > 5 then
+            hum:MoveTo(FishLocation)
+            continue
+        end
+
+        -- 2. เช็คเบ็ดและหยิบเบ็ดมาถือ
+        local rod = char:FindFirstChildWhichIsA("Tool")
+        if not rod or not (rod.Name:find("เบ็ด") or rod.Name:find("Rod") or rod:FindFirstChild("Hook") or (rod:FindFirstChild("Handle") and rod.Handle:FindFirstChild("EndRod"))) then
+            for _, item in ipairs(LocalPlayer.Backpack:GetChildren()) do
+                if item:IsA("Tool") and (item.Name:find("เบ็ด") or item.Name:find("Rod") or item:FindFirstChild("Hook") or (item:FindFirstChild("Handle") and item.Handle:FindFirstChild("EndRod"))) then
+                    hum:EquipTool(item)
+                    task.wait(0.5)
+                    rod = item
+                    break
+                end
+            end
+            continue
+        end
+
+        -- 3. เหวี่ยงเบ็ดตกปลา
+        if rod and rod:FindFirstChild("Handle") and rod.Handle:FindFirstChild("EndRod") then
+            local isFishing = false
+            for _, v in pairs(rod:GetChildren()) do
+                if v.Name == "Hook" then 
+                    isFishing = true 
+                    break
+                end
+            end
+
+            if not isFishing and (tick() - lastCastTime > 3.0) then
+                local targetCast = root.Position + (root.CFrame.LookVector * 20) - Vector3.new(0, 10, 0)
+                
+                pcall(function()
+                    FishingRemote:FireServer(targetCast, rod.Handle.EndRod, rod)
+                end)
+                
+                lastCastTime = tick()
+                task.wait(1.5) 
+            end
+        end
+    end
+end)
